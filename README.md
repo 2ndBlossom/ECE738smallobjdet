@@ -49,11 +49,9 @@ $  classid    x_c   y_c   longside   shortside    Θ    Θ∈[0, 180)
 
 * shortside: The other side of the oriented rectangle.
 
-* Θ: The angle between the longside and the x-axis(The x-axis rotates clockwise).x轴顺时针旋转遇到最长边所经过的角度
+* Θ: The angle between the longside and the x-axis(The x-axis rotates clockwise).
 ```
-`WARNING: IMAGE SIZE MUST MEETS 'HEIGHT = WIDTH'`
 
-![label_format_demo](./label_format_demo.png)
 
 `2.` `'train.py'` 
 
