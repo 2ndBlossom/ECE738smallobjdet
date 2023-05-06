@@ -1,6 +1,3 @@
-# YOLOv5_DOTA_OBB
-YOLOv5 in DOTA_OBB dataset with CSL_label.(Oriented Object Detection)
-
 
 ## Datasets and pretrained checkpoint
 * `Datasets` : [DOTA](https://captain-whu.github.io/DOTA/dataset.html)
