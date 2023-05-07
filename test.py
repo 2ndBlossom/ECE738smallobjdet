@@ -35,7 +35,7 @@ def test(data,
          plots=True):
 
     # Initialize/load model and set device
-    # 判断是否在训练时调用test，如果是则获取训练时的设备
+
     training = model is not None
     if training:  # called by train.py
         device = next(model.parameters()).device  # get model device
@@ -51,7 +51,7 @@ def test(data,
             os.makedirs(out)  # make new output folder
 
         # Remove previous
-        # 删除之前的test_batch0_gt.jpg和test_batch0_pred.jpg
+
         for f in glob.glob(str(save_dir / 'test_batch*.jpg')):
             os.remove(f)
 
@@ -64,65 +64,51 @@ def test(data,
         #     model = nn.DataParallel(model)
 
     # Half
-    # 如果设备不是cpu，则将模型由Float32转为Float16，提高前向传播的速度
+
     half = device.type != 'cpu'  # half precision only supported on CUDA
     if half:
         model.half()
 
     # Configure
-    # 将模型字符串转变为函数
+
     model.eval()
     with open(data) as f:
         data = yaml.load(f, Loader=yaml.FullLoader)  # model dict
     check_dataset(data)  # check
     nc = 1 if single_cls else int(data['nc'])  # number of classes
-    # 设置iou阈值，从0.5~0.95，每间隔0.05取一次
+
     iouv = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
     # iou个数
     niou = iouv.numel()
 
     # Dataloader
     if not training:
-        # 创建一个全0数组测试一下前向传播是否正常运行
+
         img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
         _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
 
-        # 获取图片路径
+
         path = data['test'] if opt.task == 'test' else data['val']  # path to val/test images
-        # 创建dataloader
-        # 注意这里rect参数为True，yolov5的测试评估是基于矩形推理的
+
         dataloader = create_dataloader(path, imgsz, batch_size, model.stride.max(), opt,
                                        hyp=None, augment=False, cache=False, pad=0.5, rect=True)[0]
 
-    # 初始化测试的图片数量
-    seen = 0
-    # 获取类别的名字
+
     names = model.names if hasattr(model, 'names') else model.module.names
-    """
-      获取coco数据集的类别索引
-      这里要说明一下，coco数据集有80个类别(索引范围应该为0~79)，
-      但是他的索引却属于0~90(笔者是通过查看coco数据测试集的json文件发现的，具体原因不知)
-      coco80_to_coco91_class()就是为了与上述索引对应起来，返回一个范围在0~90的索引数组
-    """
+
     coco91class = coco80_to_coco91_class()
-    # 设置tqdm进度条的显示信息
+
     s = ('%20s' + '%12s' * 6) % ('Class', 'Images', 'Targets', 'P', 'R', 'mAP@.5', 'mAP@.5:.95')
-    # 初始化指标，时间
+
     p, r, f1, mp, mr, map50, map, t0, t1 = 0., 0., 0., 0., 0., 0., 0., 0., 0.
-    # 初始化测试集的损失
+
     loss = torch.zeros(4, device=device)
-    # 初始化json文件的字典，统计信息，ap
+
     jdict, stats, ap, ap_class = [], [], [], []
     for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
-        '''
-        i: batch_index, 第i个batch
-        imgs : torch.Size([batch_size, 3, weights, heights])
-        targets : torch.Size = (该batch中的目标数量, [该image属于该batch的第几个图片, class, xywh, Θ])   
-        paths : List['img1_path','img2_path',......,'img-1_path']  len(paths)=batch_size
-        shape :
-        '''
+
         img = img.to(device, non_blocking=True)
-        # 图片也由Float32->Float16
+
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
         targets = targets.to(device)
@@ -133,15 +119,7 @@ def test(data,
         with torch.no_grad():
             # Run model
             t = time_synchronized()
-            '''
-            Detect层在的输出：(z,x)
-             if training : 
-                x list: [small_forward, medium_forward, large_forward]  eg:small_forward.size=( batch_size, 3种scale框, size1, size2, no)
-             else : 
-                (z,x)
-                    z tensor: [small+medium+large_inference]  size=(batch_size, 3 * (small_size1*small_size2 + medium_size1*medium_size2 + large_size1*large_size2), no) 真实坐标
-                    x list: [small_forward, medium_forward, large_forward]  eg:small_forward.size=( batch_size, 3种scale框, size1, size2, no)
-            '''
+
             inf_out, train_out = model(img, augment=augment)  # inference and training outputs
             t0 += time_synchronized() - t
 
@@ -158,11 +136,7 @@ def test(data,
 
         # Statistics per image
         for si, pred in enumerate(output):
-            '''
-            targets : torch.Size = (该batch中的目标数量, [该image属于该batch的第几个图片, class, xywh, θ]) θ∈[0,179]
-            pred : shape=(num_conf_nms, [xywhθ,conf,classid]) θ∈[0,179]
-            si : 该batch中的第几张图
-            '''
+
             # labels: shape= (num, [class, xywh, θ])
             labels = targets[targets[:, 0] == si, 1:]
             nl = len(labels)
@@ -303,23 +277,7 @@ def test(data,
 
 
 if __name__ == '__main__':
-    """
-    opt参数详解
-    weights:测试的模型权重文件
-    data:数据集配置文件，数据集路径，类名等
-    batch-size:前向传播时的批次, 默认32
-    img-size:输入图片分辨率大小, 默认640
-    conf-thres:筛选框的时候的置信度阈值, 默认0.001
-    iou-thres:进行NMS的时候的IOU阈值, 默认0.65
-    save-json:是否按照coco的json格式保存预测框，并且使用cocoapi做评估(需要同样coco的json格式的标签), 默认False
-    task:设置测试形式, 默认val, 具体可看下面代码解析注释
-    device:测试的设备，cpu；0(表示一个gpu设备cuda:0)；0,1,2,3(多个gpu设备)
-    single-cls:数据集是否只有一个类别，默认False
-    augment:测试时是否使用TTA(test time augmentation), 默认False
-    merge:在进行NMS时，是否通过合并方式获得预测框, 默认False
-    verbose:是否打印出每个类别的mAP, 默认False
-    save-txt:是否以txt文件的形式保存模型预测的框坐标, 默认False
-    """
+
     parser = argparse.ArgumentParser(prog='test.py')
     parser.add_argument('--weights', nargs='+', type=str, default='../rotation-yolov5/runs/rotated_trainDOTA_0/weights/last.pt', help='model.pt path(s)')
     parser.add_argument('--data', type=str, default='data/coco128.yaml', help='*.data path')
@@ -336,11 +294,11 @@ if __name__ == '__main__':
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
     opt = parser.parse_args()
     opt.save_json |= opt.data.endswith('coco.yaml')
-    # check_file检查文件是否存在
+
     opt.data = check_file(opt.data)  # check file
     print(opt)
 
-    # task = ['val', 'test']时就正常测试验证集、测试集
+
     if opt.task in ['val', 'test']:  # run normally
         test(opt.data,
              opt.weights,
@@ -353,7 +311,7 @@ if __name__ == '__main__':
              opt.augment,
              opt.verbose)
 
-    # task == 'study'时，就评估yolov5系列和yolov3-spp各个模型在各个尺度下的指标并可视化
+
     elif opt.task == 'study':  # run over a range of settings and save/plot
         for weights in ['yolov5s.pt', 'yolov5m.pt', 'yolov5l.pt', 'yolov5x.pt']:
             f = 'study_%s_%s.txt' % (Path(opt.data).stem, Path(weights).stem)  # filename to save to
