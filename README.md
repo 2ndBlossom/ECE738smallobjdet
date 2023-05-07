@@ -36,23 +36,11 @@ $   python setup.py build_ext --inplace
 
 * You can refer to  [hukaixuan19970627/DOTA_devkit_YOLO](https://github.com/hukaixuan19970627/DOTA_devkit_YOLO).
 
-* The Oriented YOLO Longside Format is:
-
-```
-$  classid    x_c   y_c   longside   shortside    Θ    Θ∈[0, 180)
-
-
-* longside: The longest side of the oriented rectangle.
-
-* shortside: The other side of the oriented rectangle.
-
-* Θ: The angle between the longside and the x-axis(The x-axis rotates clockwise).
-```
 
 
 `2.` `'train.py'` 
 
-* All same as [ultralytics/yolov5](https://github.com/ultralytics/yolov5).
+* All the same as [ultralytics/yolov5](https://github.com/ultralytics/yolov5).
 * Single GPU training:
 ```
 $ python train.py  --batch-size 4 --device 0
