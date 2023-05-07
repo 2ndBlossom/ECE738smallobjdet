@@ -34,81 +34,48 @@ logger = logging.getLogger(__name__)
 
 def train(hyp, opt, device, tb_writer=None):
     logger.info(f'Hyperparameters {hyp}')
-    """
-    获取记录训练日志的路径:
-    训练日志包括：权重、tensorboard文件、超参数hyp、设置的训练参数opt(也就是epochs,batch_size等),result.txt
-    result.txt包括: 占GPU内存、训练集的GIOU loss, objectness loss, classification loss, 总loss, 
-    targets的数量, 输入图片分辨率, 准确率TP/(TP+FP),召回率TP/P ; 
-    测试集的mAP50, mAP@0.5:0.95, GIOU loss, objectness loss, classification loss.
-    还会保存batch<3的ground truth
-    """
-    # 如果设置进化算法则不会传入tb_writer(则为None)，设置一个evolve文件夹作为日志目录
+
     log_dir = Path(tb_writer.log_dir) if tb_writer else Path(opt.logdir) / 'evolve'  # logging directory
 
-    # 设置生成文件的保存路径
+
     wdir = log_dir / 'weights'  # weights directory
     os.makedirs(wdir, exist_ok=True)
     last = wdir / 'last.pt'
     best = wdir / 'best.pt'
     results_file = str(log_dir / 'results.txt')
 
-    # 获取轮次、批次、总批次(涉及到分布式训练)、权重、进程序号(主要用于分布式训练)
+
     epochs, batch_size, total_batch_size, weights, rank = \
         opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank
 
     # Save run settings
-    # 保存hyp和opt
+
     with open(log_dir / 'hyp.yaml', 'w') as f:
         yaml.dump(hyp, f, sort_keys=False)
     with open(log_dir / 'opt.yaml', 'w') as f:
         yaml.dump(vars(opt), f, sort_keys=False)
 
     # Configure
-    # 获取数据路径
+
     cuda = device.type != 'cpu'
-    # 设置随机种子
-    # 需要在每一个进程设置相同的随机种子，以便所有模型权重都初始化为相同的值，即确保神经网络每次初始化都相同
+
     init_seeds(2 + rank)
-    # 加载数据配置信息
+
     with open(opt.data) as f:
         data_dict = yaml.load(f, Loader=yaml.FullLoader)  # data dict
 
-    # torch_distributed_zero_first同步所有进程
-    # check_dataset检查数据集，如果没找到数据集则下载数据集(仅适用于项目中自带的yaml文件数据集)
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
 
-    # 获取训练集、测试集图片路径
+
     train_path = data_dict['train']
     test_path = data_dict['val']
 
-    # 获取类别数量和类别名字
-    # 如果设置了opt.single_cls则为一类
+
+
     nc, names = (1, ['item']) if opt.single_cls else (int(data_dict['nc']), data_dict['names'])  # 保存data.yaml中的number classes, names
     assert len(names) == nc, '%g names found for nc=%g dataset in %s' % (len(names), nc, opt.data)  # check
 
-    # Model
-    # 判断weights字符串是否以'.pt'为结尾。若是，则说明本次训练需要预训练模型
-    pretrained = weights.endswith('.pt')
-    if pretrained:
-        # 加载模型，从google云盘中自动下载模型
-        # 但通常会下载失败，建议提前下载下来放进weights目录
-        with torch_distributed_zero_first(rank):
-            attempt_download(weights)  # download if not found locally
-        ckpt = torch.load(weights, map_location=device)  # load checkpoint 导入权重文件
-        """
-            这里模型创建，可通过opt.cfg，也可通过ckpt['model'].yaml
-            这里的区别在于是否是resume，resume时会将opt.cfg设为空，
-            则按照ckpt['model'].yaml创建模型；
-            这也影响着下面是否除去anchor的key(也就是不加载anchor)，
-            如果resume，则加载权重中保存的anchor来继续训练；
-            主要是预训练权重里面保存了默认coco数据集对应的anchor，
-            如果用户自定义了anchor，再加载预训练权重进行训练，会覆盖掉用户自定义的anchor；
-            所以这里主要是设定一个，如果加载预训练权重进行训练的话，就去除掉权重中的anchor，采用用户自定义的；
-            如果是resume的话，就是不去除anchor，就权重和anchor一起加载， 接着训练；
-            参考https://github.com/ultralytics/yolov5/issues/459
-            所以下面设置了intersect_dicts，该函数就是忽略掉exclude中的键对应的值
-        """
         '''
         ckpt:
              {'epoch': -1, 
@@ -120,9 +87,9 @@ def train(hyp, opt, device, tb_writer=None):
               'optimizer': None
               }
         '''
-        if hyp.get('anchors'):  # 用户自定义的anchors优先级大于权重文件中自带的anchors
+        if hyp.get('anchors'):
             ckpt['model'].yaml['anchors'] = round(hyp['anchors'])  # force autoanchor
-        # 创建并初始化yolo模型
+
         model = Model(opt.cfg or ckpt['model'].yaml, ch=3, nc=nc).to(device)  # create
         '''
         model = 
@@ -134,23 +101,18 @@ def train(hyp, opt, device, tb_writer=None):
                                             )
                       )
         '''
-        # 如果opt.cfg存在，或重新设置了'anchors'，则将预训练权重文件中的'anchors'参数清除，使用用户自定义的‘anchors’信息
+
         exclude = ['anchor'] if opt.cfg or hyp.get('anchors') else []  # exclude keys
-        # state_dict变量存放训练过程中需要学习的权重和偏执系数，state_dict 是一个python的字典格式,以字典的格式存储,然后以字典的格式被加载,而且只加载key匹配的项
-        # 将ckpt中的‘model’中的”可训练“的每一层的参数建立映射关系（如 'conv1.weight'： 数值...）存在state_dict中
         state_dict = ckpt['model'].float().state_dict()  # to FP32
-        # 加载除了与exclude以外，所有与key匹配的项的参数  即将权重文件中的参数导入对应层中
         state_dict = intersect_dicts(state_dict, model.state_dict(), exclude=exclude)  # intersect
-        # 将最终模型参数导入yolo模型
         model.load_state_dict(state_dict, strict=False)  # load
         logger.info('Transferred %g/%g items from %s' % (len(state_dict), len(model.state_dict()), weights))  # report
     else:
-        # 不进行预训练，则直接创建并初始化yolo模型
         model = Model(opt.cfg, ch=3, nc=nc).to(device)  # create
 
     # Freeze
     #freeze = ['', ]  # parameter names to freeze (full or partial)
-    freeze = ['model.%s.' % x for x in range(10)]  # 冻结带有'model.0.'-'model.9.'的所有参数 即冻结0-9层的backbone
+    freeze = ['model.%s.' % x for x in range(10)] 
     if any(freeze):
         for k, v in model.named_parameters():
             if any(x in k for x in freeze):
@@ -158,54 +120,35 @@ def train(hyp, opt, device, tb_writer=None):
                 v.requires_grad = False
 
     # Optimizer
-    """
-    nbs人为模拟的batch_size; 
-    就比如默认的话上面设置的opt.batch_size为16,这个nbs就为64，
-    也就是模型梯度累积了64/16=4(accumulate)次之后
-    再更新一次模型，变相的扩大了batch_size
-    """
+
     nbs = 64  # nominal batch size
     accumulate = max(round(nbs / total_batch_size), 1)  # accumulate loss before optimizing
-    # 根据accumulate设置权重衰减系数
     hyp['weight_decay'] *= total_batch_size * accumulate / nbs  # scale weight_decay
 
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
-    # 将模型分成三组(w权重参数（非bn层）, bias, 其他所有参数)优化
-    for k, v in model.named_parameters():  # named_parameters：网络层的名字和参数的迭代器
-        '''
-        (0): Focus(
-                   (conv): Conv(
-                                 (conv): Conv2d(12, 80, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-                                 (bn): BatchNorm2d(80, eps=0.001, momentum=0.03, affine=True, track_running_stats=True)
-                                 (act): Hardswish()
-                                )
-                   )
-        k: 网络层可训练参数的名字所属  如： model.0.conv.conv.weight 或 model.0.conv.bn.weight 或 model.0.conv.bn.bias  （Focus层举例）
-        v： 对应网络层的具体参数   如：对应model.0.conv.conv.weight的 size为(80，12，3，3)的参数数据 即 卷积核的数量为80，深度为12，size为3×3
-        '''
-        v.requires_grad = True  # 设置当前参数在训练时保留梯度信息
-        if '.bias' in k:
-            pg2.append(v)  # biases  (所有的偏置参数)
-        elif '.weight' in k and '.bn' not in k:
-            pg1.append(v)  # apply weight decay (非bn层的权重参数w)
-        else:
-            pg0.append(v)  # all else  （网络层的其他参数）
 
-    # 选用优化器，并设置pg0组的优化方式
+    for k, v in model.named_parameters(): 
+
+        v.requires_grad = True  
+        if '.bias' in k:
+            pg2.append(v)  # biases  
+        elif '.weight' in k and '.bn' not in k:
+            pg1.append(v)  # apply weight decay 
+        else:
+            pg0.append(v)  # all else 
+
+    
     if opt.adam:
         optimizer = optim.Adam(pg0, lr=hyp['lr0'], betas=(hyp['momentum'], 0.999))  # adjust beta1 to momentum
     else:
         optimizer = optim.SGD(pg0, lr=hyp['lr0'], momentum=hyp['momentum'], nesterov=True)
 
-    # 设置权重参数weights（非bn层）的优化方式
     optimizer.add_param_group({'params': pg1, 'weight_decay': hyp['weight_decay']})  # add pg1 with weight_decay
-    # 设置偏置参数bias的优化方式
     optimizer.add_param_group({'params': pg2})  # add pg2 (biases)
     logger.info('Optimizer groups: %g .bias, %g conv.weight, %g other' % (len(pg2), len(pg1), len(pg0)))
     del pg0, pg1, pg2
 
-    # 设置学习率衰减，这里为余弦退火方式进行衰减
-    # 就是根据以下公式lf,epoch和超参数hyp['lrf']进行衰减
+
     # Scheduler https://arxiv.org/pdf/1812.01187.pdf
     # https://pytorch.org/docs/stable/_modules/torch/optim/lr_scheduler.html#OneCycleLR
     lf = lambda x: ((1 + math.cos(x * math.pi / epochs)) / 2) * (1 - hyp['lrf']) + hyp['lrf']  # cosine  匿名余弦退火函数
