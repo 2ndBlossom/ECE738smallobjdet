@@ -261,13 +261,7 @@ def voc_eval(detpath,
     return rec, prec, ap
 
 def evaluation(detoutput, imageset, annopath, classnames):
-    """
-    评估程序
-    @param detoutput: detect.py函数的结果存放输出路径
-    @param imageset: # val DOTA原图数据集图像路径
-    @param annopath: 'r/.../{:s}.txt'  原始val测试集的DOTAlabels路径
-    @param classnames: 测试集中的目标种类
-    """
+
     result_before_merge_path = str(detoutput + '/result_txt/result_before_merge')
     result_merged_path = str(detoutput + '/result_txt/result_merged')
     result_classname_path = str(detoutput + '/result_txt/result_classname')
@@ -278,21 +272,21 @@ def evaluation(detoutput, imageset, annopath, classnames):
         result_before_merge_path,
         result_merged_path
     )
-    print('检测结果已merge')
+    print('prediction merges')
     evaluation_trans(
         result_merged_path,
         result_classname_path
     )
-    print('检测结果已按照类别分类')
+    print('prediction done')
     image2txt(
-        imageset,  # val原图数据集路径
+        imageset,  
         imageset_name_file_path
               )
-    print('校验数据集名称文件已生成')
+    print('folder created')
 
-    detpath = str(result_classname_path + '/Task1_{:s}.txt')  # 'r/.../Task1_{:s}.txt'  存放各类别结果文件txt的路径
+    detpath = str(result_classname_path + '/Task1_{:s}.txt')  # 'r/.../Task1_{:s}.txt' 
     annopath = annopath
-    imagesetfile = str(imageset_name_file_path +'/imgnamefile.txt')  # 'r/.../imgnamefile.txt'  测试集图片名称txt
+    imagesetfile = str(imageset_name_file_path +'/imgnamefile.txt')  # 'r/.../imgnamefile.txt' 
 
     # detpath = r'PATH_TO_BE_CONFIGURED/Task1_{:s}.txt'
     # annopath = r'PATH_TO_BE_CONFIGURED/{:s}.txt' # change the directory to the path of val/labelTxt, if you want to do evaluation on the valset
@@ -333,16 +327,7 @@ def evaluation(detoutput, imageset, annopath, classnames):
 
 
 if __name__ == '__main__':
-    '''
-    计算AP的流程:
-    1.detect.py检测一个文件夹的所有图片并把检测结果按照图片原始来源存入 原始图片名称.txt中:   (rbox2txt函数)
-        txt中的内容格式:  目标所属图片名称_分割id 置信度 poly classname
-    2.ResultMerge.py将所有 原始图片名称.txt 进行merge和nms,并将结果存入到另一个文件夹的 原始图片名称.txt中:
-        txt中的内容格式:  目标所属图片名称 置信度 poly classname
-    3.写一个evaluation_trans.py将上个文件夹中的所有txt中的目标提取出来,按照目标类别分别存入 Task1_类别名.txt中:
-        txt中的内容格式:  目标所属原始图片名称 置信度 poly
-    4.写一个imgname2txt.py 将测试集的所有图片名称打印到namefile.txt中
-    '''
+
     # For DOTA-v1.5
     classnames = ['plane', 'baseball-diamond', 'bridge', 'ground-track-field', 'small-vehicle', 'large-vehicle', 'ship', 'tennis-court',
                'basketball-court', 'storage-tank',  'soccer-ball-field', 'roundabout', 'harbor', 'swimming-pool', 'helicopter', 'container-crane']
